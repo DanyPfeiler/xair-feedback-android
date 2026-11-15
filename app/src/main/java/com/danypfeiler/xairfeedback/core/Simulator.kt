@@ -25,6 +25,8 @@ class Simulator : Thread("xair-sim") {
     private val tones = ArrayList<Tone>()
     private val rnd = Random()
     @Volatile var bandPlaying = true
+    /** true = la consola "desaparece": no contesta ni envia nada (para probar la reconexion). */
+    @Volatile var offline = false
     @Volatile private var stopFlag = false
     private var client: SocketAddress? = null
     private var subUntil = 0L
@@ -48,6 +50,16 @@ class Simulator : Thread("xair-sim") {
     fun param(path: String): Any? = synchronized(lock) { params[path] }
     fun paramKeys(): Set<String> = synchronized(lock) { HashSet(params.keys) }
     fun requestStop() { stopFlag = true }
+
+    /** Simula que la consola se reinicio: pierde todo lo que se le escribio (EQ, volumen). */
+    fun reboot() {
+        synchronized(lock) {
+            params.clear()
+            params["/-prefs/rta/source"] = 0
+            params["/-prefs/rta/pos"] = 1
+        }
+        subUntil = 0
+    }
 
     private val demoNames = mapOf("/ch/01/config/name" to "Voz Lider", "/ch/02/config/name" to "Coros",
                                   "/ch/03/config/name" to "Pista", "/ch/04/config/name" to "Acordeon")
@@ -158,7 +170,7 @@ class Simulator : Thread("xair-sim") {
                 sock.receive(p)
                 val from = p.socketAddress
                 val msg = Osc.decode(buf, p.length)
-                if (msg != null) {
+                if (msg != null && !offline) {
                     client = from
                     when {
                         msg.addr == "/meters" -> subUntil = System.currentTimeMillis() + 10000
@@ -181,7 +193,7 @@ class Simulator : Thread("xair-sim") {
                 val c = client
                 val blob: ByteArray? = synchronized(lock) {
                     stepTones(dt)
-                    if (c != null && now < subUntil) Osc.meterBlob(frame()) else null
+                    if (c != null && now < subUntil && !offline) Osc.meterBlob(frame()) else null
                 }
                 if (blob != null && c != null) reply(Osc.encode("/meters/4", blob), c)
             }

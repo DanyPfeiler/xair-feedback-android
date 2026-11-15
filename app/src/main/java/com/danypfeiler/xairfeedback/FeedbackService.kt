@@ -6,6 +6,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.wifi.WifiManager
 import android.os.IBinder
 import android.os.PowerManager
@@ -39,6 +43,7 @@ class FeedbackService : Service(), Engine.Listener {
     private var wifiLock: WifiManager.WifiLock? = null
     private var lastNotifText = ""
     private var channelReady = false
+    private var netCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -62,7 +67,8 @@ class FeedbackService : Service(), Engine.Listener {
         starting = true
         val base = Prefs.load(this)
         acquireLocks()
-        val wifi = AppState.wifiBinder(this)
+        holdWifi()
+        val ctx = applicationContext
         AppState.post {
             AppState.running = true
             AppState.cuts = emptyList()
@@ -71,7 +77,8 @@ class FeedbackService : Service(), Engine.Listener {
         Thread {
             try {
                 var cfg = base
-                var binder = wifi
+                // Se vuelve a consultar en cada reconexion: si el Wi-Fi se cayo y volvio, la red es otra.
+                var binder: (() -> ((java.net.DatagramSocket) -> Unit)?)? = { AppState.wifiBinder(ctx) }
                 if (cfg.useSim) {
                     val sim = Simulator()
                     sim.start()
@@ -79,7 +86,7 @@ class FeedbackService : Service(), Engine.Listener {
                     cfg = cfg.copy(host = "127.0.0.1", port = sim.port)
                     binder = null
                     AppState.log("--- SIMULADOR: nada de esto llega a la consola real ---")
-                } else if (binder == null) {
+                } else if (AppState.wifiBinder(ctx) == null) {
                     AppState.log("AVISO: el telefono no esta conectado a ningun Wi-Fi. Conectalo al Wi-Fi de la consola.")
                 }
                 val e = Engine(cfg, this, binder)
@@ -106,7 +113,41 @@ class FeedbackService : Service(), Engine.Listener {
         }
     }
 
+    /**
+     * Le pide al sistema la red Wi-Fi aunque no tenga internet (la de la consola no tiene). Asi
+     * Android no la abandona por los datos moviles, y nos avisa cuando se cae y cuando vuelve.
+     */
+    private fun holdWifi() {
+        if (netCallback != null) return
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val req = NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            val cb = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) { AppState.wifiNetwork = network }
+                override fun onLost(network: Network) { if (AppState.wifiNetwork == network) AppState.wifiNetwork = null }
+            }
+            cm.requestNetwork(req, cb)
+            netCallback = cb
+        } catch (e: Exception) {
+            AppState.log("AVISO: no pude pedirle al sistema que mantenga el Wi-Fi ($e).")
+        }
+    }
+
+    private fun releaseWifi() {
+        val cb = netCallback ?: return
+        netCallback = null
+        try {
+            (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(cb)
+        } catch (e: Exception) {
+        }
+        AppState.wifiNetwork = null
+    }
+
     private fun releaseLocks() {
+        releaseWifi()
         try { wake?.let { if (it.isHeld) it.release() } } catch (e: Exception) { }
         try { wifiLock?.let { if (it.isHeld) it.release() } } catch (e: Exception) { }
         wake = null

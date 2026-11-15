@@ -21,6 +21,7 @@ class NotchBank(
     private val notches = ArrayList<Notch>()
     private val faders = HashMap<String, Fader?>()
     private val fullAlert = HashMap<String, Double>()
+    private val failedAt = HashMap<String, Long>()
 
     val hasChanges: Boolean get() = notches.isNotEmpty() || faders.values.any { it != null && it.red > 0 }
 
@@ -30,13 +31,14 @@ class NotchBank(
 
     /** Lee y guarda el estado actual del EQ de ese destino. true si se puede usar. */
     fun prepare(target: String): Boolean {
-        if (targets.containsKey(target)) return targets[target] != null
+        if (targets[target] != null) return true
+        val now = System.currentTimeMillis()
+        if (now - (failedAt[target] ?: 0L) < 10000) return false      // fallo hace poco: no insistir ya
         val bands = if (target.startsWith("ch/")) cfg.chBands else cfg.busBands
         val name = label(target)
         val eqOn = num(m.get("/$target/eq/on"))
         if (eqOn == null) {
-            log("No pude leer el EQ de $name: ahi solo voy a avisar.")
-            targets[target] = null
+            if (failedAt.put(target, now) == null) log("No pude leer el EQ de $name; vuelvo a intentar en unos segundos.")
             return false
         }
         if (!target.startsWith("ch/")) {
@@ -64,9 +66,10 @@ class NotchBank(
             }
         }
         if (saved.isEmpty()) {
-            targets[target] = null
+            failedAt[target] = now
             return false
         }
+        failedAt.remove(target)
         if (eqOn.toInt() == 0) {
             log("El EQ de $name estaba apagado: lo enciendo (vuelve a su estado al detener).")
             m.send("/$target/eq/on", 1)
@@ -187,6 +190,25 @@ class NotchBank(
             }
         }
         return changed
+    }
+
+    /**
+     * Vuelve a escribir en la consola todos los cortes y bajadas de volumen vigentes. Se usa al
+     * reconectar: si la consola se reinicio, perdio los cortes. Devuelve cuantos reescribio.
+     */
+    fun reapply(): Int {
+        for ((target, info) in targets) {
+            if (info != null && !info.eqOn && notches.any { it.target == target }) m.send("/$target/eq/on", 1)
+        }
+        for (n in notches) write(n)
+        var count = notches.size
+        for ((t, st) in faders) {
+            if (st != null && st.red > 0) {
+                m.send("/$t/mix/fader", Scales.dbToFader(Scales.faderToDb(st.orig) - st.red).toFloat())
+                count++
+            }
+        }
+        return count
     }
 
     fun snapshot(): List<CutRow> {

@@ -97,4 +97,37 @@ class EngineSimTest {
         val r = run(Config(sources = listOf("ch1"), apply = true), 30.0) { it.addFeedback(1, 2000.0, "lr", 30.0) }
         assertTrue(r.logs.any { "Hay que bajarlo a mano" in it })
     }
+
+    /** La consola desaparece 12 s y vuelve reiniciada: el motor reconecta solo y repone el corte. */
+    @Test fun reconectaSoloYReponeLosCortes() {
+        val sim = Simulator()
+        sim.start()
+        sim.addFeedback(1, 2500.0)
+        val logs = Collections.synchronizedList(ArrayList<String>())
+        val engine = Engine(Config(host = "127.0.0.1", port = sim.port, sources = listOf("ch1"), apply = true),
+            object : Engine.Listener {
+                override fun onLog(text: String) { logs.add(text); println(text) }
+                override fun onStatus(text: String) {}
+                override fun onSpectrum(src: String, frame: FloatArray, candidates: IntArray) {}
+                override fun onCuts(cuts: List<CutRow>) {}
+                override fun onStopped() {}
+            })
+        engine.start()
+        Thread.sleep(9000)
+        assertTrue("corto antes del corte de red", Scales.floatToGain((sim.param("/ch/01/eq/3/g") as Number).toDouble()) < -2)
+        sim.offline = true
+        sim.reboot()
+        Thread.sleep(12000)
+        assertTrue("aviso la perdida", logs.any { "se perdio la conexion" in it })
+        assertTrue("el motor sigue vivo", engine.isAlive)
+        sim.offline = false
+        Thread.sleep(9000)
+        assertTrue("reconecto", logs.any { "Reconectado" in it })
+        assertTrue("repuso el corte", Scales.floatToGain(((sim.param("/ch/01/eq/3/g") as? Number) ?: 0.5f).toDouble()) < -2)
+        engine.requestStop()
+        engine.join(6000)
+        Thread.sleep(200)
+        assertEquals("restauro al detener", 0.0, Scales.floatToGain(((sim.param("/ch/01/eq/3/g") as? Number) ?: 0.5f).toDouble()), 0.05)
+        sim.requestStop()
+    }
 }

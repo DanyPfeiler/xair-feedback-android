@@ -30,6 +30,8 @@ object AppState {
     @Volatile var specFrame: FloatArray? = null
     @Volatile var specCands: IntArray = IntArray(0)
     @Volatile var sim: Simulator? = null
+    /** Red Wi-Fi vigente segun el sistema (la mantiene el servicio mientras trabaja). */
+    @Volatile var wifiNetwork: android.net.Network? = null
 
     fun log(text: String) {
         main.post {
@@ -51,7 +53,7 @@ object AppState {
         return try {
             val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             @Suppress("DEPRECATION")
-            val wifi = cm.allNetworks.firstOrNull {
+            val wifi = wifiNetwork ?: cm.allNetworks.firstOrNull {
                 cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
             } ?: return null
             val bind: (DatagramSocket) -> Unit = { s -> wifi.bindSocket(s) }

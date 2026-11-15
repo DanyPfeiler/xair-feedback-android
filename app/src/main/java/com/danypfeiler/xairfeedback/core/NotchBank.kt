@@ -6,7 +6,10 @@ import kotlin.math.abs
  * Administra los cortes en uno o varios EQ (canal, Main LR, buses), la bajada de volumen de
  * ultimo recurso, y deja todo como estaba al restaurar.
  */
-class NotchBank(private val m: Mixer, private val cfg: Config, private val log: (String) -> Unit) {
+class NotchBank(
+    private val m: Mixer, private val cfg: Config, private val log: (String) -> Unit,
+    private val label: (String) -> String = { Scales.targetLabel(it) }
+) {
     private class Saved(val f: Float, val g: Float, val q: Float, val type: Int)
     private class Target(val bands: List<Int>, val saved: Map<Int, Saved>, val eqOn: Boolean)
     private class Notch(val target: String, val band: Int, val binf: Double, val freq: Double, var depth: Double,
@@ -29,7 +32,7 @@ class NotchBank(private val m: Mixer, private val cfg: Config, private val log: 
     fun prepare(target: String): Boolean {
         if (targets.containsKey(target)) return targets[target] != null
         val bands = if (target.startsWith("ch/")) cfg.chBands else cfg.busBands
-        val name = Scales.targetLabel(target)
+        val name = label(target)
         val eqOn = num(m.get("/$target/eq/on"))
         if (eqOn == null) {
             log("No pude leer el EQ de $name: ahi solo voy a avisar.")
@@ -95,7 +98,7 @@ class NotchBank(private val m: Mixer, private val cfg: Config, private val log: 
             fullAlert[key] = now
             return "ALERTA: feedback en %.0f Hz y %s. Hay que bajar el volumen a mano.".format(hit.freq, why)
         }
-        val name = Scales.targetLabel(srcT)
+        val name = label(srcT)
         if (!faders.containsKey(srcT)) {
             val x = num(m.get("/$srcT/mix/fader"))
             faders[srcT] = if (x == null) null else Fader(x.toDouble())
@@ -138,7 +141,7 @@ class NotchBank(private val m: Mixer, private val cfg: Config, private val log: 
                     n.levelAt = hit.level
                     write(n)
                     return "profundizo a -%.0f dB el corte de %.0f Hz en %s (banda %d)"
-                        .format(n.depth, n.freq, Scales.targetLabel(n.target), n.band)
+                        .format(n.depth, n.freq, label(n.target), n.band)
                 }
             }
         }
@@ -151,9 +154,9 @@ class NotchBank(private val m: Mixer, private val cfg: Config, private val log: 
             val n = Notch(t, free, hit.binf, hit.freq, p.firstCut, now, now, hit.level)
             notches.add(n)
             write(n)
-            val extra = if (t == target) "" else " (sin bandas libres en " + Scales.targetLabel(target) + ")"
+            val extra = if (t == target) "" else " (sin bandas libres en " + label(target) + ")"
             return "corte nuevo: %.0f Hz, -%.0f dB en %s (banda %d)%s"
-                .format(n.freq, n.depth, Scales.targetLabel(t), n.band, extra)
+                .format(n.freq, n.depth, label(t), n.band, extra)
         }
         if (near.isNotEmpty()) {
             for (n in near) n.tAction = now
@@ -176,10 +179,10 @@ class NotchBank(private val m: Mixer, private val cfg: Config, private val log: 
                 if (n.depth <= 0.01) {
                     restoreBand(n.target, n.band)
                     notches.remove(n)
-                    log("solte el corte de %.0f Hz en %s (no volvio a sonar)".format(n.freq, Scales.targetLabel(n.target)))
+                    log("solte el corte de %.0f Hz en %s (no volvio a sonar)".format(n.freq, label(n.target)))
                 } else {
                     write(n)
-                    log("aflojo a -%.0f dB el corte de %.0f Hz en %s".format(n.depth, n.freq, Scales.targetLabel(n.target)))
+                    log("aflojo a -%.0f dB el corte de %.0f Hz en %s".format(n.depth, n.freq, label(n.target)))
                 }
             }
         }
@@ -188,9 +191,9 @@ class NotchBank(private val m: Mixer, private val cfg: Config, private val log: 
 
     fun snapshot(): List<CutRow> {
         val rows = ArrayList<CutRow>()
-        for (n in notches) rows.add(CutRow(Scales.targetLabel(n.target), n.band.toString(), n.freq, n.depth, n.binf))
+        for (n in notches) rows.add(CutRow(label(n.target), n.band.toString(), n.freq, n.depth, n.binf))
         for ((t, st) in faders) {
-            if (st != null && st.red > 0) rows.add(CutRow(Scales.targetLabel(t), "volumen", null, st.red, null))
+            if (st != null && st.red > 0) rows.add(CutRow(label(t), "volumen", null, st.red, null))
         }
         return rows
     }

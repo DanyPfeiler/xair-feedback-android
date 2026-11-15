@@ -19,9 +19,34 @@ class Engine(
         fun onSpectrum(src: String, frame: FloatArray, candidates: IntArray)
         fun onCuts(cuts: List<CutRow>)
         fun onStopped()
+        /** Nombres configurados en la consola, por clave de fuente ("ch1", "lr", "bus1"). */
+        fun onNames(names: Map<String, String>) {}
+    }
+
+    companion object {
+        /** Lee de la consola el nombre de cada canal, bus y Main LR. Los que no tienen nombre no aparecen. */
+        fun fetchNames(m: XAirClient): Map<String, String> {
+            val out = LinkedHashMap<String, String>()
+            var misses = 0
+            for (key in Scales.ALL_SOURCES) {
+                val v = m.get("/" + Scales.srcTarget(key) + "/config/name", 1)
+                if (v == null) {
+                    if (++misses >= 3) break          // la consola no responde a esto: no insistir
+                    continue
+                }
+                misses = 0
+                val name = (v as? String)?.trim() ?: ""
+                if (name.isNotEmpty()) out[key] = name
+            }
+            return out
+        }
     }
 
     @Volatile private var stopFlag = false
+    private var names: Map<String, String> = emptyMap()
+
+    private fun srcName(key: String) = names[key] ?: Scales.srcLabel(key)
+    private fun targetName(t: String) = names[Scales.targetKey(t)] ?: Scales.targetLabel(t)
     private val clock = SimpleDateFormat("HH:mm:ss", Locale.US)
 
     init { isDaemon = true }
@@ -73,13 +98,15 @@ class Engine(
             return
         }
         log("Conectado: " + info.drop(1).joinToString(" / "))
+        names = fetchNames(m)
+        listener.onNames(names)
 
         val oldSrc = (m.get("/-prefs/rta/source") as? Number)?.toInt()
         val oldPos = (m.get("/-prefs/rta/pos") as? Number)?.toInt()
         val prof = Profile.of(cfg.profile)
         val dets = sources.associateWith { Detector(prof, cfg.minFreq, cfg.maxFreq, cfg.minLevel) }
-        val bank = NotchBank(m, cfg) { log(it) }
-        val names = sources.joinToString(", ") { Scales.srcLabel(it) }
+        val bank = NotchBank(m, cfg, { log(it) }, { targetName(it) })
+        val names = sources.joinToString(", ") { srcName(it) }
         if (cfg.apply) {
             for (s in sources) bank.prepare(destTarget(s))
             log("MODO CORTAR. Analizo: $names. Agresividad: ${cfg.profile}.")
@@ -103,7 +130,7 @@ class Engine(
         try { tSwitch = select(idx) } catch (e: IOException) { }
         var lastData = now()
         var lastRelease = now()
-        listener.onStatus("Analizando " + Scales.srcLabel(sources[idx]))
+        listener.onStatus("Analizando " + srcName(sources[idx]))
         try {
             while (!stopFlag) {
                 val fr: FloatArray?
@@ -134,7 +161,7 @@ class Engine(
                 val strong = det.update(fr)
                 listener.onSpectrum(src, fr, det.lastCandidates)
                 for (hit in strong) {
-                    val where = "%s: feedback en %.0f Hz (%s)".format(Scales.srcLabel(src), hit.freq, hit.why)
+                    val where = "%s: feedback en %.0f Hz (%s)".format(srcName(src), hit.freq, hit.why)
                     if (cfg.apply) {
                         val act = try {
                             bank.handle(destTarget(src), hit, t, Scales.srcTarget(src))
@@ -165,7 +192,7 @@ class Engine(
                     if (held >= cfg.dwell && (!det.busy() || held >= 4 * cfg.dwell)) {
                         idx = (idx + 1) % sources.size
                         try { tSwitch = select(idx) } catch (e: IOException) { }
-                        listener.onStatus("Analizando " + Scales.srcLabel(sources[idx]))
+                        listener.onStatus("Analizando " + srcName(sources[idx]))
                     }
                 }
             }

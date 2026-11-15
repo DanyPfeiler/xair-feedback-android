@@ -58,6 +58,16 @@ object Scales {
         else -> "ch/%02d".format(key.substring(2).toInt())
     }
 
+    /** "ch/01" -> "ch1", "bus/1" -> "bus1", "lr" -> "lr". */
+    fun targetKey(t: String): String = when {
+        t == "lr" -> "lr"
+        t.startsWith("bus/") -> "bus" + t.substring(4)
+        else -> "ch" + t.substring(3).toInt()
+    }
+
+    val ALL_SOURCES: List<String> =
+        (1..N_CHANNELS).map { "ch$it" } + "lr" + (1..N_BUSES).map { "bus$it" }
+
     fun targetLabel(t: String): String = when {
         t == "lr" -> "Main LR"
         t.startsWith("bus/") -> "Bus " + t.substring(4)

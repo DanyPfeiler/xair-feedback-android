@@ -49,7 +49,10 @@ class Simulator : Thread("xair-sim") {
     fun paramKeys(): Set<String> = synchronized(lock) { HashSet(params.keys) }
     fun requestStop() { stopFlag = true }
 
-    private fun default(path: String): Any? = when (path.substringAfterLast('/')) {
+    private val demoNames = mapOf("/ch/01/config/name" to "Voz Lider", "/ch/02/config/name" to "Coros",
+                                  "/ch/03/config/name" to "Pista", "/ch/04/config/name" to "Acordeon")
+
+    private fun default(path: String): Any? = if (path.endsWith("/config/name")) (demoNames[path] ?: "") else when (path.substringAfterLast('/')) {
         "f" -> 0.5f
         "g" -> 0.5f
         "q" -> 0.4647f

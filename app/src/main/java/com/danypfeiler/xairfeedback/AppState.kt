@@ -20,6 +20,10 @@ object AppState {
     var status = "Detenido"
     var running = false
     var ui: (() -> Unit)? = null
+    val names = HashMap<String, String>()      // nombres leidos de la consola
+    var alertUntil = 0L                         // hasta cuando mostrar el estado en rojo
+
+    fun srcName(key: String): String = names[key] ?: com.danypfeiler.xairfeedback.core.Scales.srcLabel(key)
 
     // Lo escribe el motor, lo lee la pantalla
     @Volatile var specSrc: String? = null
@@ -85,6 +89,25 @@ object Prefs {
             minFreq = p.getFloat("minFreq", d.minFreq.toFloat()).toDouble(),
             useSim = p.getBoolean("useSim", d.useSim)
         )
+    }
+
+    fun loadNames(ctx: Context): Map<String, String> {
+        val p = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        val out = HashMap<String, String>()
+        for (key in com.danypfeiler.xairfeedback.core.Scales.ALL_SOURCES) {
+            val n = p.getString("name_$key", null)
+            if (!n.isNullOrBlank()) out[key] = n
+        }
+        return out
+    }
+
+    fun saveNames(ctx: Context, names: Map<String, String>) {
+        val e = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+        for (key in com.danypfeiler.xairfeedback.core.Scales.ALL_SOURCES) {
+            val n = names[key]
+            if (n.isNullOrBlank()) e.remove("name_$key") else e.putString("name_$key", n)
+        }
+        e.apply()
     }
 
     fun save(ctx: Context, c: Config) {

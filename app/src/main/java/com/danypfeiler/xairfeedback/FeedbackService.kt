@@ -120,6 +120,9 @@ class FeedbackService : Service(), Engine.Listener {
         engine = null
         AppState.running = false
         AppState.status = "Detenido"
+        AppState.alertUntil = 0
+        AppState.names.clear()
+        AppState.names.putAll(Prefs.loadNames(this))
         AppState.ui?.invoke()
         @Suppress("DEPRECATION")
         stopForeground(true)
@@ -135,7 +138,10 @@ class FeedbackService : Service(), Engine.Listener {
     // ---- avisos del motor (llegan desde su hilo) ------------------------------------------
     override fun onLog(text: String) {
         AppState.log(text)
-        if ("ALERTA" in text) AppState.main.post { updateNotification(text.substringAfter("ALERTA: ")) }
+        if ("ALERTA" in text) AppState.post {
+            AppState.alertUntil = System.currentTimeMillis() + 15000
+            updateNotification(text.substringAfter("ALERTA: "))
+        }
     }
 
     override fun onStatus(text: String) {
@@ -151,6 +157,14 @@ class FeedbackService : Service(), Engine.Listener {
 
     override fun onCuts(cuts: List<CutRow>) {
         AppState.post { AppState.cuts = cuts }
+    }
+
+    override fun onNames(names: Map<String, String>) {
+        if (AppState.sim == null) Prefs.saveNames(this, names)     // los del simulador no se guardan
+        AppState.post {
+            AppState.names.clear()
+            AppState.names.putAll(names)
+        }
     }
 
     override fun onStopped() {

@@ -1,7 +1,6 @@
 package com.danypfeiler.xairfeedback
 
 import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
@@ -26,7 +25,7 @@ class FeedbackService : Service(), Engine.Listener {
         private const val NOTIF_ID = 1
 
         fun start(ctx: Context) {
-            ctx.startForegroundService(Intent(ctx, FeedbackService::class.java).setAction(ACTION_START))
+            Compat.startForegroundService(ctx, Intent(ctx, FeedbackService::class.java).setAction(ACTION_START))
         }
 
         fun stop(ctx: Context) {
@@ -34,46 +33,65 @@ class FeedbackService : Service(), Engine.Listener {
         }
     }
 
-    private var engine: Engine? = null
+    @Volatile private var engine: Engine? = null
+    @Volatile private var starting = false
     private var wake: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private var lastNotifText = ""
+    private var channelReady = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            if (starting) {                      // todavia esta arrancando: detener apenas termine
+                AppState.main.postDelayed({ engine?.requestStop() }, 600)
+                return START_NOT_STICKY
+            }
             val e = engine
             if (e != null && e.isAlive) e.requestStop() else finish()
             return START_NOT_STICKY
         }
         startForeground(NOTIF_ID, notification("Iniciando..."))
-        if (engine?.isAlive == true) return START_STICKY
+        if (engine?.isAlive == true || starting) return START_STICKY
         startEngine()
         return START_STICKY
     }
 
     private fun startEngine() {
-        var cfg = Prefs.load(this)
+        starting = true
+        val base = Prefs.load(this)
         acquireLocks()
-        var binder = AppState.wifiBinder(this)
-        if (cfg.useSim) {
-            val sim = Simulator()
-            sim.start()
-            AppState.sim = sim
-            cfg = cfg.copy(host = "127.0.0.1", port = sim.port)
-            binder = null
-            AppState.log("--- SIMULADOR: nada de esto llega a la consola real ---")
-        } else if (binder == null) {
-            AppState.log("AVISO: el telefono no esta conectado a ningun Wi-Fi. Conectalo al Wi-Fi de la consola.")
-        }
+        val wifi = AppState.wifiBinder(this)
         AppState.post {
             AppState.running = true
             AppState.cuts = emptyList()
         }
-        val e = Engine(cfg, this, binder)
-        engine = e
-        e.start()
+        // Los sockets se abren fuera del hilo principal (Android no permite red en ese hilo).
+        Thread {
+            try {
+                var cfg = base
+                var binder = wifi
+                if (cfg.useSim) {
+                    val sim = Simulator()
+                    sim.start()
+                    AppState.sim = sim
+                    cfg = cfg.copy(host = "127.0.0.1", port = sim.port)
+                    binder = null
+                    AppState.log("--- SIMULADOR: nada de esto llega a la consola real ---")
+                } else if (binder == null) {
+                    AppState.log("AVISO: el telefono no esta conectado a ningun Wi-Fi. Conectalo al Wi-Fi de la consola.")
+                }
+                val e = Engine(cfg, this, binder)
+                engine = e
+                e.start()
+            } catch (ex: Exception) {
+                AppState.log("ERROR: no pude iniciar el motor: $ex")
+                AppState.main.post { finish() }
+            } finally {
+                starting = false
+            }
+        }.start()
     }
 
     private fun acquireLocks() {
@@ -142,9 +160,9 @@ class FeedbackService : Service(), Engine.Listener {
     // ---- notificacion ---------------------------------------------------------------------
     private fun notification(text: String): Notification {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (nm.getNotificationChannel(CHANNEL) == null) {
-            nm.createNotificationChannel(
-                NotificationChannel(CHANNEL, "Estado del supresor", NotificationManager.IMPORTANCE_LOW))
+        if (!channelReady) {
+            Compat.createChannel(nm, CHANNEL, "Estado del supresor")     // crear dos veces no hace dano
+            channelReady = true
         }
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -152,7 +170,7 @@ class FeedbackService : Service(), Engine.Listener {
             Intent(this, FeedbackService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         @Suppress("DEPRECATION")
-        return Notification.Builder(this, CHANNEL)
+        return Compat.notificationBuilder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle("XAir Feedback activo")
             .setContentText(text)

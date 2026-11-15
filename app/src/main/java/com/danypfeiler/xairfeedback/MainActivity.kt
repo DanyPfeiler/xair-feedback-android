@@ -235,17 +235,15 @@ class MainActivity : Activity() {
         cbRestore = CheckBox(this).apply { text = "Al detener, devolver el EQ a como estaba"; isChecked = cfg.restoreOnStop }.also { s6.addView(it) }
         cbOverflow = CheckBox(this).apply { text = "Sin bandas en el canal: seguir cortando en Main LR"; isChecked = cfg.overflowLr }.also { s6.addView(it) }
         val f1 = row(s6)
-        cbFader = CheckBox(this).apply { text = "Ultimo recurso: bajar el volumen hasta"; isChecked = cfg.faderGuard }.also { f1.addView(it) }
+        cbFader = CheckBox(this).apply { text = "Ultimo recurso: bajar el volumen hasta"; isChecked = cfg.faderGuard }.also { f1.addView(it, flex()) }
         edFaderMax = edit(fmt(cfg.faderMax), 2, decimal = true).also { f1.addView(it) }
         f1.addView(label(" dB"))
         val f2 = row(s6)
-        f2.addView(label("Soltar un corte si no vuelve en "))
+        f2.addView(label("Soltar un corte si no vuelve en (min, 0 = nunca) "), flex())
         edRelease = edit(fmt(cfg.releaseMin), 3, decimal = true).also { f2.addView(it) }
-        f2.addView(label(" min (0 = nunca)"))
         val f3 = row(s6)
-        f3.addView(label("No cortar por debajo de "))
+        f3.addView(label("No cortar por debajo de (Hz) "), flex())
         edMinFreq = edit(fmt(cfg.minFreq), 4, decimal = false).also { f3.addView(it) }
-        f3.addView(label(" Hz"))
         s6.addView(hint("Los cambios se aplican al volver a iniciar."))
 
         setContentView(ScrollView(this).apply { addView(root) })
@@ -272,6 +270,9 @@ class MainActivity : Activity() {
 
     private fun pad(top: Int) = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(top) }
+
+    /** Ocupa el ancho que sobra en una fila, para que el texto largo baje de renglon. */
+    private fun flex() = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
 
     private fun section(parent: LinearLayout, title: String): LinearLayout {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }

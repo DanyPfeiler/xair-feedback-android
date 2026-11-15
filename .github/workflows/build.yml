@@ -1,0 +1,50 @@
+name: Compilar APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Pruebas del motor contra el simulador
+        run: gradle --no-daemon testDebugUnitTest
+
+      - name: Compilar APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Preparar APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk XAirFeedback.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XAirFeedback-apk
+          path: XAirFeedback.apk
+
+      - name: Publicar en Releases (ultima version)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ultima --yes --cleanup-tag || true
+          sleep 3
+          gh release create ultima XAirFeedback.apk \
+            --title "XAir Feedback (compilacion ${{ github.run_number }})" \
+            --notes "APK generado automaticamente desde el commit ${{ github.sha }}." \
+            --target "${{ github.sha }}"
